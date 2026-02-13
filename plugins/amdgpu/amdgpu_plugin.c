@@ -1128,7 +1128,6 @@ int amdgpu_restore_init(void)
 		int ret;
 		unsigned char *buf;
 		int num_handles = 0;
-		char img_path[PATH_MAX];
 		CriuRenderNode *rd = NULL;
 		CriuKfd *e = NULL;
 
@@ -1147,7 +1146,7 @@ int amdgpu_restore_init(void)
 
 					ret = read_fp(img_fp, buf, img_size);
 					if (ret) {
-						pr_perror("Unable to read from %s", img_path);
+						pr_perror("Unable to read from %s", dir->d_name);
 						fclose(img_fp);
 						xfree(buf);
 						return ret;
@@ -1169,7 +1168,7 @@ int amdgpu_restore_init(void)
 
 					ret = read_fp(img_fp, buf, img_size);
 					if (ret) {
-						pr_perror("Unable to read from %s", img_path);
+						pr_perror("Unable to read from %s", dir->d_name);
 						fclose(img_fp);
 						xfree(buf);
 						return ret;
