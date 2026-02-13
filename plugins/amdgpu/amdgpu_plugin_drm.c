@@ -378,6 +378,7 @@ int amdgpu_plugin_drm_dump_file(int fd, int id, struct stat *drm)
 		drmPrimeHandleToFD(device_fd, boinfo->handle, 0, &dmabuf_fd);
 
 		snprintf(img_path, sizeof(img_path), IMG_DRM_PAGES_FILE, rd->id, rd->drm_render_minor, i);
+		image_size = handle_entry.size;
 		bo_contents_fp = open_img_file(img_path, true, &image_size);
 
 		posix_memalign(&buffer, sysconf(_SC_PAGE_SIZE), handle_entry.size);
