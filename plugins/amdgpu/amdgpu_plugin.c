@@ -568,6 +568,7 @@ int sdma_copy_bo(int shared_fd, uint64_t size, int storage_fd,
 	amdgpu_context_handle h_ctx;
 	uint32_t *ib = NULL;
 	int j, err, err2, packets_per_buffer;
+	unsigned int retries = 0;
 
 	if (type != SDMA_OP_VRAM_READ && type != SDMA_OP_VRAM_WRITE) {
 		pr_err("Invalid sdma operation");
@@ -600,6 +601,8 @@ int sdma_copy_bo(int shared_fd, uint64_t size, int storage_fd,
 		break;
 	}
 
+retry_src_va:
+	retries++;
 	err = amdgpu_va_range_alloc(h_dev, amdgpu_gpu_va_range_general, src_bo_size, 0x1000, 0, &gpu_addr_src,
 				    &h_va_src, 0);
 	if (err) {
@@ -608,6 +611,8 @@ int sdma_copy_bo(int shared_fd, uint64_t size, int storage_fd,
 	}
 	err = amdgpu_bo_va_op(h_bo_src, 0, src_bo_size, gpu_addr_src, 0, AMDGPU_VA_OP_MAP);
 	if (err) {
+		if (retries < 1000)
+			goto retry_src_va;
 		pr_err("failed to GPU map the source BO (VA: %lx, size: %lx) - %s",
 		       gpu_addr_src, src_bo_size, strerror(-err));
 		goto err_src_bo_map;
@@ -634,6 +639,9 @@ int sdma_copy_bo(int shared_fd, uint64_t size, int storage_fd,
 		break;
 	}
 
+	retries = 0;
+retry_dst_va:
+	retries++;
 	err = amdgpu_va_range_alloc(h_dev, amdgpu_gpu_va_range_general, dst_bo_size, 0x1000, 0, &gpu_addr_dst,
 				    &h_va_dst, 0);
 	if (err) {
@@ -643,6 +651,8 @@ int sdma_copy_bo(int shared_fd, uint64_t size, int storage_fd,
 	}
 	err = amdgpu_bo_va_op(h_bo_dst, 0, dst_bo_size, gpu_addr_dst, 0, AMDGPU_VA_OP_MAP);
 	if (err) {
+		if (retries < 1000)
+			goto retry_dst_va;
 		pr_err("failed to GPU map the destination BO (VA: %lx, size: %lx) - %s",
 		       gpu_addr_dst, dst_bo_size, strerror(-err));
 		goto err_dst_bo_map;
