@@ -50,7 +50,6 @@
 #include "util.h"
 
 struct vma_metadata {
-	struct list_head list;
 	uint64_t old_pgoff;
 	uint64_t new_pgoff;
 	uint64_t vma_entry;
@@ -58,8 +57,6 @@ struct vma_metadata {
 };
 
 /************************************ Global Variables ********************************************/
-
-static LIST_HEAD(update_vma_info_list);
 
 size_t kfd_max_buffer_size;
 
@@ -76,6 +73,8 @@ static struct shared_memory {
 	mutex_t			mutex;
 	int 			num_handles;
 	struct handle_id	*handles;
+	int			num_vmas;
+	struct vma_metadata	vma[128];
 } *shared_memory;
 
 /*
@@ -1244,6 +1243,7 @@ int amdgpu_restore_init(void)
 	mutex_init(&shared_memory->mutex);
 
 	shared_memory->num_handles = num_handles;
+	shared_memory->num_vmas = 0;
 
 	return 0;
 }
@@ -1687,12 +1687,19 @@ int save_vma_updates(uint64_t offset, uint64_t addr, uint64_t restored_offset,
 		     int fd)
 {
 	struct vma_metadata *vma_md;
+	int ret = 0;
 
-	vma_md = xmalloc(sizeof(*vma_md));
-	if (!vma_md) {
-		return -ENOMEM;
+	if (!shared_memory)
+		return -ENXIO;
+
+	mutex_lock(&shared_memory->mutex);
+
+	if (shared_memory->num_vmas == ARRAY_SIZE(shared_memory->vma)) {
+		ret = -E2BIG;
+		goto out;
 	}
 
+	vma_md = &shared_memory->vma[shared_memory->num_vmas++];
 	vma_md->old_pgoff = offset;
 	vma_md->vma_entry = addr;
 	vma_md->new_pgoff = restored_offset;
@@ -1702,9 +1709,10 @@ int save_vma_updates(uint64_t offset, uint64_t addr, uint64_t restored_offset,
 		 vma_md->vma_entry, vma_md->old_pgoff, vma_md->new_pgoff,
 		 vma_md->fd);
 
-	list_add_tail(&vma_md->list, &update_vma_info_list);
+out:
+	mutex_unlock(&shared_memory->mutex);
 
-	return 0;
+	return ret;
 }
 
 static int restore_bo_data(int id, struct kfd_criu_bo_bucket *bo_buckets, CriuKfd *e)
@@ -2144,14 +2152,16 @@ CR_PLUGIN_REGISTER_HOOK(CR_PLUGIN_HOOK__RESTORE_EXT_FILE, amdgpu_plugin_restore_
 int amdgpu_plugin_update_vmamap(const char *in_path, const uint64_t addr, const uint64_t old_offset,
 				uint64_t *new_offset, int *updated_fd)
 {
-	struct vma_metadata *vma_md;
-	char path[PATH_MAX];
-	char *p_begin;
-	char *p_end;
 	bool is_kfd = false, is_renderD = false;
+	char *p_begin, *p_end;
+	char path[PATH_MAX];
+	int i;
 
 	if (plugin_disabled)
 		return -ENOTSUP;
+
+	if (!shared_memory)
+		return -ENXIO;
 
 	strncpy(path, in_path, sizeof(path));
 
@@ -2180,7 +2190,10 @@ int amdgpu_plugin_update_vmamap(const char *in_path, const uint64_t addr, const 
 		return 0;
 	}
 
-	list_for_each_entry(vma_md, &update_vma_info_list, list) {
+	mutex_lock(&shared_memory->mutex);
+	for (i = 0; i < shared_memory->num_vmas; i++) {
+		struct vma_metadata *vma_md = &shared_memory->vma[i];
+
 		if (old_offset != vma_md->old_pgoff)
 			continue;
 		if (is_kfd && addr != vma_md->vma_entry)
@@ -2199,11 +2212,13 @@ int amdgpu_plugin_update_vmamap(const char *in_path, const uint64_t addr, const 
 			*updated_fd = -1;
 		}
 
+		mutex_unlock(&shared_memory->mutex);
 		pr_debug("old_pgoff=0x%lx new_pgoff=0x%lx fd=%d\n",
 			 vma_md->old_pgoff, vma_md->new_pgoff, *updated_fd);
 
 		return 1;
 	}
+	mutex_unlock(&shared_memory->mutex);
 	pr_info("No match for addr:0x%lx offset:%lx\n", addr, old_offset);
 	return 0;
 }
