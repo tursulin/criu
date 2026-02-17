@@ -71,13 +71,12 @@ struct handle_id {
 	int handle;
 	int fdstore_id;
 };
-struct shared_handle_ids {
-	int num_handles;
-	struct handle_id *handles;
-};
-struct shared_handle_ids *shared_memory = NULL;
 
-static mutex_t *shared_memory_mutex;
+static struct shared_memory {
+	mutex_t			mutex;
+	int 			num_handles;
+	struct handle_id	*handles;
+} *shared_memory;
 
 /*
  * In the case of a single process (common case), this optimization can effectively
@@ -1099,38 +1098,47 @@ CR_PLUGIN_REGISTER_HOOK(CR_PLUGIN_HOOK__DUMP_DEVICES_LATE, amdgpu_unpause_proces
 
 int store_dmabuf_fd(int handle, int fd)
 {
+	int ret = -1;
 	int id;
 
+	if (!shared_memory)
+		return -1;
+
 	id = fdstore_add(fd);
-	mutex_lock(shared_memory_mutex);
+	mutex_lock(&shared_memory->mutex);
 	for (int i = 0; i < shared_memory->num_handles; i++) {
 		if (shared_memory->handles[i].handle == handle) {
-			mutex_unlock(shared_memory_mutex);
-			return 0;
-		}
-		if (shared_memory->handles[i].handle == -1) {
+			ret = 0;
+			break;
+		} else if (shared_memory->handles[i].handle == -1) {
 			shared_memory->handles[i].handle = handle;
 			shared_memory->handles[i].fdstore_id = id;
-			mutex_unlock(shared_memory_mutex);
-			return 0;
+			ret = 0;
+			break;
 		}
 	}
-	mutex_unlock(shared_memory_mutex);
+	mutex_unlock(&shared_memory->mutex);
 
-	return -1;
+	return ret;
 }
 
 int amdgpu_id_for_handle(int handle)
 {
-	mutex_lock(shared_memory_mutex);
+	int ret = -1;
+
+	if (!shared_memory)
+		return -1;
+
+	mutex_lock(&shared_memory->mutex);
 	for (int i = 0; i < shared_memory->num_handles; i++) {
 		if (shared_memory->handles[i].handle == handle) {
-			mutex_unlock(shared_memory_mutex);
-			return shared_memory->handles[i].fdstore_id;
+			ret = shared_memory->handles[i].fdstore_id;
+			break;
 		}
 	}
-	mutex_unlock(shared_memory_mutex);
-	return -1;
+	mutex_unlock(&shared_memory->mutex);
+
+	return ret;
 }
 
 static int load_img(char *filename, unsigned char **out_buf, size_t *out_len)
@@ -1211,26 +1219,31 @@ int amdgpu_restore_init(void)
 	}
 	closedir(d);
 
-	if (num_handles > 0) {
-		const int protection = PROT_READ | PROT_WRITE;
-		const int visibility = MAP_SHARED | MAP_ANONYMOUS;
+	if (!num_handles)
+		return 0;
 
-		shared_memory = mmap(NULL, sizeof(shared_memory), protection, visibility, -1, 0);
-		shared_memory->num_handles = num_handles;
-		shared_memory->handles = mmap(NULL, sizeof(struct handle_id) * num_handles, protection, visibility, -1, 0);
-
-		for (int i = 0; i < num_handles; i++) {
-			shared_memory->handles[i].handle = -1;
-			shared_memory->handles[i].fdstore_id = -1;
-		}
-
-		shared_memory_mutex = shmalloc(sizeof(*shared_memory_mutex));
-		if (!shared_memory_mutex) {
-			pr_err("Can't create amdgpu mutex\n");
-			return -1;
-		}
-		mutex_init(shared_memory_mutex);
+	shared_memory = shmalloc(sizeof(*shared_memory));
+	if (!shared_memory) {
+		pr_err("Can't create amdgpu shared memory\n");
+		return -1;
 	}
+
+	shared_memory->handles = shmalloc(num_handles *
+					  sizeof(*shared_memory->handles));
+	if (!shared_memory->handles) {
+		shfree_last(shared_memory);
+		pr_err("Can't create amdgpu shared memory handles\n");
+		return -1;
+	}
+
+	for (int i = 0; i < num_handles; i++) {
+		shared_memory->handles[i].handle = -1;
+		shared_memory->handles[i].fdstore_id = -1;
+	}
+
+	mutex_init(&shared_memory->mutex);
+
+	shared_memory->num_handles = num_handles;
 
 	return 0;
 }
