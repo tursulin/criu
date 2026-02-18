@@ -1864,7 +1864,7 @@ static int amdgpu_plugin_restore_drm_file(int id, bool *retry_needed)
 	CriuRenderNode *rd;
 	unsigned char *buf;
 	size_t img_size;
-	int fd, ret;
+	int probed_fd, fd, ret;
 
 	/* This is restorer plugin for renderD nodes. Criu doesn't guarantee
 	 * that they will be called before the plugin is called for kfd file
@@ -1965,7 +1965,20 @@ static int amdgpu_plugin_restore_drm_file(int id, bool *retry_needed)
 		goto fail;
 	}
 
-	ret = amdgpu_plugin_drm_restore_file(fd, rd);
+	/*
+	 * HACK! to figure out the final/restored fd we need to restore vmas.
+	 * It will not work if non-linear fd space, neither inside a forked
+	 * process which inherits the vma but does not have the same device
+	 * kept open or under the same fd.
+	 */
+	probed_fd = dup(fd);
+	if (probed_fd < 0) {
+		pr_perror("Failed to probe fd\n");
+		return -1;
+	}
+	close(probed_fd);
+
+	ret = amdgpu_plugin_drm_restore_file(fd, rd, probed_fd);
 	if (ret == 1)
 		*retry_needed = true;
 	if (ret < 0) {

@@ -24,7 +24,7 @@ int amdgpu_plugin_drm_handle_device_vma(int fd, const struct stat *drm);
  */
 int amdgpu_plugin_drm_dump_file(int fd, int id, struct stat *drm);
 
-int amdgpu_plugin_drm_restore_file(int fd, CriuRenderNode *rd);
+int amdgpu_plugin_drm_restore_file(int fd, CriuRenderNode *rd, int probed_fd);
 
 int amdgpu_plugin_drm_unpause_file(int fd);
 

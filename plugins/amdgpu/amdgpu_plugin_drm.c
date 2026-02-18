@@ -451,7 +451,7 @@ exit:
 	return ret;
 }
 
-int amdgpu_plugin_drm_restore_file(int fd, CriuRenderNode *rd)
+int amdgpu_plugin_drm_restore_file(int fd, CriuRenderNode *rd, int probed_fd)
 {
 	int ret = 0;
 	bool retry_needed = false;
@@ -549,7 +549,7 @@ int amdgpu_plugin_drm_restore_file(int fd, CriuRenderNode *rd)
 		}
 
 		ret = save_vma_updates(boinfo->offset, boinfo->addr,
-				       mmap_args.out.addr_ptr, fd);
+				       mmap_args.out.addr_ptr, probed_fd);
 		if (ret < 0)
 			goto exit;
 	}
