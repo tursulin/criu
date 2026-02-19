@@ -163,8 +163,8 @@ static int restore_bo_contents_drm(int drm_render_minor, CriuRenderNode *rd, int
 	amdgpu_device_handle h_dev;
 	uint64_t max_copy_size;
 	uint32_t major, minor;
-	FILE *bo_contents_fp = NULL;
 	void *buffer = NULL;
+	int bo_contents_fd;
 	char img_path[40];
 	int i, ret = 0;
 
@@ -208,22 +208,21 @@ static int restore_bo_contents_drm(int drm_render_minor, CriuRenderNode *rd, int
 
 		snprintf(img_path, sizeof(img_path), IMG_DRM_PAGES_FILE, rd->id, drm_render_minor, i);
 
-		bo_contents_fp = open_img_file(img_path, false, &image_size);
-		if (!bo_contents_fp) {
-			ret = -EIO;
+		bo_contents_fd = open_img_file(img_path, false, &image_size);
+		if (bo_contents_fd < 0) {
+			ret = bo_contents_fd;
 			pr_err("Failed to open BO image file %s\n", img_path);
 			break;
 		}
 
-		ret = sdma_copy_bo(dmabufs[i], rd->bo_entries[i]->size, bo_contents_fp, buffer, buffer_size, h_dev, max_copy_size,
-				   SDMA_OP_VRAM_WRITE, true);
+		ret = sdma_copy_bo(dmabufs[i], rd->bo_entries[i]->size,
+				   bo_contents_fd, buffer, buffer_size, h_dev,
+				   max_copy_size, SDMA_OP_VRAM_WRITE, true);
+		close(bo_contents_fd);
 		if (ret) {
 			pr_err("Failed to fill the BO using sDMA: bo_buckets[%d]\n", i);
 			break;
 		}
-
-		if (bo_contents_fp)
-			fclose(bo_contents_fp);
 	}
 
 exit:
@@ -304,12 +303,12 @@ int amdgpu_plugin_drm_dump_file(int fd, int id, struct stat *drm)
 		DrmBoEntry *boinfo = rd->bo_entries[i];
 		struct drm_amdgpu_gem_list_handles_entry handle_entry = list_handles_entries[i];
 		union drm_amdgpu_gem_mmap mmap_args = { 0 };
+		int bo_contents_fd;
 		int dmabuf_fd;
 		uint32_t major, minor;
 		amdgpu_device_handle h_dev;
 		void *buffer = NULL;
 		char img_path[40];
-		FILE *bo_contents_fp = NULL;
 		int device_fd;
 
 		boinfo->size = handle_entry.size;
@@ -385,24 +384,23 @@ int amdgpu_plugin_drm_dump_file(int fd, int id, struct stat *drm)
 
 		snprintf(img_path, sizeof(img_path), IMG_DRM_PAGES_FILE, rd->id, rd->drm_render_minor, i);
 		image_size = handle_entry.size;
-		bo_contents_fp = open_img_file(img_path, true, &image_size);
-		if (!bo_contents_fp) {
-			ret = -EIO;
+		bo_contents_fd = open_img_file(img_path, true, &image_size);
+		if (bo_contents_fd < 0) {
+			ret = bo_contents_fd;
 			goto exit;
 		}
 
 		posix_memalign(&buffer, sysconf(_SC_PAGE_SIZE), handle_entry.size);
 
-		ret = sdma_copy_bo(dmabuf_fd, handle_entry.size, bo_contents_fp, buffer, handle_entry.size, h_dev, 0x1000,
+		ret = sdma_copy_bo(dmabuf_fd, handle_entry.size, bo_contents_fd,
+				   buffer, handle_entry.size, h_dev, 0x1000,
 				   SDMA_OP_VRAM_READ, false);
+		close(bo_contents_fd);
 		if (ret)
 			goto exit;
 
 		if (dmabuf_fd != KFD_INVALID_FD)
 			close(dmabuf_fd);
-
-		if (bo_contents_fp)
-			fclose(bo_contents_fp);
 
 		ret = amdgpu_device_deinitialize(h_dev);
 		if (ret)
