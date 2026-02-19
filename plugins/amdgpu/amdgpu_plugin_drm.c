@@ -210,6 +210,11 @@ static int restore_bo_contents_drm(int drm_render_minor, CriuRenderNode *rd, int
 		snprintf(img_path, sizeof(img_path), IMG_DRM_PAGES_FILE, rd->id, drm_render_minor, i);
 
 		bo_contents_fp = open_img_file(img_path, false, &image_size);
+		if (!bo_contents_fp) {
+			ret = -EIO;
+			pr_err("Failed to open BO image file %s\n", img_path);
+			break;
+		}
 
 		ret = sdma_copy_bo(dmabufs[i], rd->bo_entries[i]->size, bo_contents_fp, buffer, buffer_size, h_dev, max_copy_size,
 				   SDMA_OP_VRAM_WRITE, true);
@@ -380,6 +385,10 @@ int amdgpu_plugin_drm_dump_file(int fd, int id, struct stat *drm)
 		snprintf(img_path, sizeof(img_path), IMG_DRM_PAGES_FILE, rd->id, rd->drm_render_minor, i);
 		image_size = handle_entry.size;
 		bo_contents_fp = open_img_file(img_path, true, &image_size);
+		if (!bo_contents_fp) {
+			ret = -EIO;
+			goto exit;
+		}
 
 		posix_memalign(&buffer, sysconf(_SC_PAGE_SIZE), handle_entry.size);
 
