@@ -451,23 +451,13 @@ int amdgpu_plugin_drm_restore_file(int fd, CriuRenderNode *rd)
 {
 	int ret = 0;
 	bool retry_needed = false;
-	uint32_t major, minor;
-	amdgpu_device_handle h_dev;
-	int device_fd, *dmabufs;
+	int *dmabufs;
 
 	dmabufs = xzalloc(sizeof(int) * rd->num_of_bos);
 	if (!dmabufs) {
 		pr_err("Failed allocate memory for drm restore\n");
 		return -ENOMEM;
 	}
-
-	ret = amdgpu_device_initialize(fd, &major, &minor, &h_dev);
-	if (ret) {
-		pr_info("Error in init amdgpu device\n");
-		goto exit;
-	}
-
-	device_fd = amdgpu_device_get_fd(h_dev);
 
 	for (int i = 0; i < rd->num_of_bos; i++) {
 		DrmBoEntry *boinfo = rd->bo_entries[i];
@@ -492,7 +482,7 @@ int amdgpu_plugin_drm_restore_file(int fd, CriuRenderNode *rd)
 		}
 
 		if (boinfo->is_import) {
-			drmPrimeFDToHandle(device_fd, dmabuf_fd, &handle);
+			drmPrimeFDToHandle(fd, dmabuf_fd, &handle);
 		} else {
 			union drm_amdgpu_gem_create create_args = { 0 };
 
@@ -508,7 +498,7 @@ int amdgpu_plugin_drm_restore_file(int fd, CriuRenderNode *rd)
 			}
 			handle = create_args.out.handle;
 
-			drmPrimeHandleToFD(device_fd, handle, 0, &dmabuf_fd);
+			drmPrimeHandleToFD(fd, handle, 0, &dmabuf_fd);
 		}
 
 		change_args.handle = handle;
@@ -568,8 +558,6 @@ int amdgpu_plugin_drm_restore_file(int fd, CriuRenderNode *rd)
 	ret = record_completed_work(-1, rd->drm_render_minor);
 	if (ret)
 		goto exit;
-
-	ret = amdgpu_device_deinitialize(h_dev);
 
 	if (rd->num_of_bos > 0) {
 		ret = restore_bo_contents_drm(rd->drm_render_minor, rd, fd, dmabufs);
