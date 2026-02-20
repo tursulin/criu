@@ -454,8 +454,13 @@ int amdgpu_plugin_drm_restore_file(int fd, CriuRenderNode *rd)
 	bool retry_needed = false;
 	uint32_t major, minor;
 	amdgpu_device_handle h_dev;
-	int device_fd;
-	int *dmabufs = xzalloc(sizeof(int) * rd->num_of_bos);
+	int device_fd, *dmabufs;
+
+	dmabufs = xzalloc(sizeof(int) * rd->num_of_bos);
+	if (!dmabufs) {
+		pr_err("Failed allocate memory for drm restore\n");
+		return -ENOMEM;
+	}
 
 	ret = amdgpu_device_initialize(fd, &major, &minor, &h_dev);
 	if (ret) {
@@ -573,9 +578,9 @@ int amdgpu_plugin_drm_restore_file(int fd, CriuRenderNode *rd)
 	}
 
 exit:
+	xfree(dmabufs);
 	if (ret < 0)
 		return ret;
-	xfree(dmabufs);
 
 	return retry_needed;
 }
